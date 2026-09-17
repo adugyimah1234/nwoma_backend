@@ -188,33 +188,47 @@ exports.createReceipt = async (req, res) => {
 
     // If this is a registration payment, try to link it to an active assessment session
     if (registration_id && receipt_type.some(rt => rt.type === "registration")) {
-      const [regRows] = await connection.query(
-        "SELECT class_applying_for, category_id, garrison_id, school_id FROM registrations WHERE id = ?",
-        [registration_id]
-      );
-
-      if (regRows.length > 0) {
-        const reg = regRows[0];
-
-        // Find applicable assessments in this garrison
-        // Logic: Garrison-wide (school_id is NULL) overrides school-specific
-        const [assessments] = await connection.query(
-          `SELECT id, school_id FROM assessments
-           WHERE garrison_id = ?
-           AND (class_level = ? OR class_level = 'All Classes')
-           AND (category_id = ? OR category_id IS NULL)
-           AND (school_id = ? OR school_id IS NULL)
-           ORDER BY school_id ASC LIMIT 1`,
-           // ORDER BY school_id ASC puts NULL (garrison-wide) first in many SQL dialects,
-           // but to be safe and explicit:
-          [reg.garrison_id, reg.class_applying_for, reg.category_id, reg.school_id]
+      try {
+        const [regRows] = await connection.query(
+          "SELECT class_applying_for, category, garrison_id, school_id FROM registrations WHERE id = ?",
+          [registration_id]
         );
 
-        if (assessments.length > 0) {
-          // If we have multiple, prioritize the one with school_id NULL (Garrison Director's)
-          const garrisonWide = assessments.find(a => a.school_id === null);
-          assessment_id = garrisonWide ? garrisonWide.id : assessments[0].id;
+        if (regRows.length > 0) {
+          const reg = regRows[0];
+
+          // Find category_id based on reg.category (could be an ID or name like 'Day'/'Boarding')
+          let categoryId = null;
+          if (reg.category) {
+            const [catRows] = await connection.query(
+              "SELECT id FROM categories WHERE id = ? OR name = ? LIMIT 1",
+              [reg.category, reg.category]
+            );
+            if (catRows.length > 0) {
+              categoryId = catRows[0].id;
+            }
+          }
+
+          // Find applicable assessments in this garrison
+          // Logic: Garrison-wide (school_id is NULL) overrides school-specific
+          const [assessments] = await connection.query(
+            `SELECT id, school_id FROM assessments
+             WHERE garrison_id = ?
+             AND (class_id = ? OR class_id IS NULL)
+             AND (category_id = ? OR category_id IS NULL)
+             AND (school_id = ? OR school_id IS NULL)
+             ORDER BY school_id ASC LIMIT 1`,
+            [reg.garrison_id, reg.class_applying_for, categoryId, reg.school_id]
+          );
+
+          if (assessments.length > 0) {
+            // If we have multiple, prioritize the one with school_id NULL (Garrison Director's)
+            const garrisonWide = assessments.find(a => a.school_id === null);
+            assessment_id = garrisonWide ? garrisonWide.id : assessments[0].id;
+          }
         }
+      } catch (assessmentErr) {
+        logger.error("Error auto-assigning assessment to receipt: " + assessmentErr.message);
       }
     }
 
@@ -278,7 +292,7 @@ exports.triggerReceiptNotifications = async (receiptId) => {
             FROM receipts r
             LEFT JOIN students s ON r.student_id = s.id
             LEFT JOIN registrations reg ON r.registration_id = reg.id
-            LEFT JOIN parents p ON s.parent_id = p.id
+            LEFT JOIN parents p ON s.id = p.student_id
             LEFT JOIN schools sch ON r.school_id = sch.id
             WHERE r.id = ?
         `, [receiptId]);
@@ -324,7 +338,7 @@ exports.getPrintableReceipt = async (req, res) => {
         LEFT JOIN registrations reg ON r.registration_id = reg.id
         LEFT JOIN classes c ON c.id = COALESCE(r.class_id, s.class_id, reg.class_applying_for)
         LEFT JOIN users u ON r.issued_by = u.id
-        LEFT JOIN categories cat ON cat.id = COALESCE(s.category_id, reg.category_id)
+        LEFT JOIN categories cat ON cat.id = s.category_id OR cat.name = reg.category
         LEFT JOIN schools sch ON sch.id = COALESCE(s.school_id, r.school_id)
       WHERE r.id = ?`,
       [id]

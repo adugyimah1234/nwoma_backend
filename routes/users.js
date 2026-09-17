@@ -2,7 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
-const { protect } = require('../middlewares/authMiddleware'); // Import using the correct name
+const Role = require('../models/role.model');
+const { protect } = require('../middlewares/authMiddleware');
 const userController = require('../controllers/usersController');
 const bcrypt = require('bcryptjs');
 const response = require('../utils/apiResponse');
@@ -20,13 +21,15 @@ router.get('/', protect, async (req, res) => {
     `;
     let params = [];
 
+    const currentUserRole = (user.role || '').toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+
     if (user.role === 'garrison_director' || user.role === 'admin') {
-      query += ' WHERE u.garrison_id = ?';
+      query += " WHERE u.garrison_id = ? AND LOWER(REPLACE(REPLACE(r.name, '_', ''), ' ', '')) != 'superadmin'";
       params = [user.garrison_id];
     } else if (user.role === 'school_admin' || user.school_id) {
-      query += ' WHERE u.school_id = ?';
+      query += " WHERE u.school_id = ? AND LOWER(REPLACE(REPLACE(r.name, '_', ''), ' ', '')) != 'superadmin'";
       params = [user.school_id];
-    } else if (user.role !== 'superadmin' && user.role !== 'super_admin') {
+    } else if (currentUserRole !== 'superadmin') {
       return response.error(res, 'Access denied', 403);
     }
 
@@ -52,6 +55,30 @@ router.post('/', protect, async (req, res) => {
   }
 
   try {
+    // 🛡️ High-level Admin Protection Logic
+    const [targetRoleRows] = await db.query('SELECT name FROM roles WHERE id = ?', [role_id]);
+    const targetRole = targetRoleRows[0];
+
+    if (targetRole) {
+      const targetRoleName = targetRole.name.toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+      const currentUserRoleStr = (currentUser.role || '').toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+
+      if (targetRoleName === 'superadmin' && currentUserRoleStr !== 'superadmin') {
+        return res.status(403).json({
+          error: "Forbidden: Only a superadmin can assign or create a superadmin account."
+        });
+      }
+
+      // Enforce boundary logic for school_admin
+      if (currentUserRoleStr === 'schooladmin') {
+        if (targetRoleName === 'superadmin' || targetRoleName === 'schooladmin') {
+          return res.status(403).json({
+            error: "Unauthorized action: School Administrators are not allowed to create or provision high-level Admin accounts."
+          });
+        }
+      }
+    }
+
     let final_school_id = school_id;
     let garrison_id = currentUser.garrison_id;
 
@@ -65,9 +92,10 @@ router.post('/', protect, async (req, res) => {
           return res.status(403).json({ error: 'Selected school does not belong to your Garrison' });
         }
       }
-    } else if (currentUser.role === 'school_admin') {
-      // School Admins can only create users for their own school
+    } else if (currentUser.role === 'school_admin' || currentUserRoleStr === 'schooladmin') {
+      // School Admins can create operational users (teachers, accountants, etc.) for their own school
       final_school_id = currentUser.school_id;
+      garrison_id = currentUser.garrison_id;
     } else if (currentUser.role !== 'superadmin' && currentUser.role !== 'super_admin') {
       return res.status(403).json({ error: 'Not authorized to create users' });
     }
@@ -137,6 +165,30 @@ router.put('/:id', protect, async (req, res) => {
     }
 
     if (role_id !== undefined) {
+      // 🛡️ High-level Admin Protection Logic for Updates
+      const [targetRoleRows] = await db.query('SELECT name FROM roles WHERE id = ?', [role_id]);
+      const targetRole = targetRoleRows[0];
+
+      if (targetRole) {
+        const targetRoleName = targetRole.name.toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+        const currentUserRoleStr = (req.user.role || '').toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+
+        if (targetRoleName === 'superadmin' && currentUserRoleStr !== 'superadmin') {
+          return res.status(403).json({
+            error: "Forbidden: Only a superadmin can assign the superadmin role."
+          });
+        }
+
+        // Enforce boundary logic for school_admin updating a user role
+        if (currentUserRoleStr === 'schooladmin') {
+          if (targetRoleName === 'superadmin' || targetRoleName === 'schooladmin') {
+            return res.status(403).json({
+              error: "Unauthorized action: School Administrators are not allowed to assign or provision high-level Admin accounts."
+            });
+          }
+        }
+      }
+
       updates.push('role_id = ?');
       values.push(role_id);
     }

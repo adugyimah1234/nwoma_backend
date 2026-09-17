@@ -16,19 +16,42 @@ const xss = require('xss-clean');
 // ✅ Professional Proxy Trust (Essential for Cloudflare)
 app.set('trust proxy', 1);
 
-// ✅ Security Middleware
+// ✅ 1. CORS Configuration (MUST BE FIRST)
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173', // Common Vite port
+      'https://3-gec.com'
+    ];
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`🚫 CORS Blocked Origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+};
+app.use(cors(corsOptions));
+
+// ✅ 2. Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: false,
 }));
-app.use(xss());    // Prevent XSS attacks
-app.use(hpp());    // Prevent HTTP Parameter Pollution
+app.use(xss());
+app.use(hpp());
 
-// ✅ Rate Limiting (Prevents Brute Force/DoS)
+// ✅ 3. Global Rate Limiting (Increased to be less aggressive)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  max: 500, // Increased from 100 to 500 for standard dashboard use
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
@@ -62,25 +85,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ CORS Configuration (dynamic origin + credentials)
-const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'https://3-gec.com'
-    ];
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-};
-
-
-app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser()); // ✅ Enables reading cookies
 

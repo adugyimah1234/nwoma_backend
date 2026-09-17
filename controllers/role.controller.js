@@ -4,7 +4,25 @@ const crypto = require('crypto');
 exports.getAllRoles = async (req, res) => {
   try {
     const roles = await Role.getAll();
-    res.json(roles);
+    const currentUserRole = (req.user?.role || '').toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+
+    // 🛡️ Filter Logic: Hide administrative roles based on user privileges
+    const filteredRoles = roles.filter(role => {
+      const normalizedRoleName = role.name.toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+
+      if (normalizedRoleName === 'superadmin') {
+        return currentUserRole === 'superadmin';
+      }
+
+      if (normalizedRoleName === 'schooladmin') {
+        // School admins cannot view or assign the schooladmin role to others
+        return currentUserRole !== 'schooladmin';
+      }
+
+      return true;
+    });
+
+    res.json(filteredRoles);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

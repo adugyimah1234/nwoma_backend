@@ -35,8 +35,11 @@ const smartLimiter = (options = {}) => {
       if (isWhitelisted(ip)) return 0; // 0 in express-rate-limit 7+ means unlimited if used with skip
 
       // 2. Role-based limits
-      if (req.user) {
-        if (req.user.role === 'admin' || req.user.role === 'super_admin' || req.user.role === 'garrison_director') {
+      if (req.user && req.user.role) {
+        const role = req.user.role.toLowerCase().replace(/_/g, '').replace(/\s/g, '');
+        const staffRoles = ['admin', 'superadmin', 'schooladmin', 'garrisondirector'];
+
+        if (staffRoles.includes(role)) {
           return options.adminMax || 2000; // High limit for staff
         }
       }

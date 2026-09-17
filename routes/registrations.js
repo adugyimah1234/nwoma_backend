@@ -5,12 +5,18 @@ const { registrationRules, validate } = require("../middlewares/validationMiddle
 const { apiLimiter } = require("../middleware/rateLimiter");
 const registrationController = require("../controllers/registrationController");
 
+// Professional Lean Routes
+// Logic has been moved to controllers/registrationController.js
+
 /**
- * Professional Lean Routes
- * Logic has been moved to controllers/registrationController.js
+ * @swagger
+ * tags:
+ *   name: Registrations
+ *   description: Student admission registration management
  */
 
-// Apply API Limiter to all registration routes
+// Apply auth first, then the limiter so it recognizes the user role
+router.use(protect);
 router.use(apiLimiter);
 
 /**
@@ -85,7 +91,7 @@ router.use(apiLimiter);
  *       200:
  *         description: List of all registrations
  */
-router.get("/", protect, registrationController.getAllRegistrations);
+router.get("/", registrationController.getAllRegistrations);
 
 /**
  * @swagger
@@ -111,7 +117,6 @@ router.get("/", protect, registrationController.getAllRegistrations);
  */
 router.post(
   "/create",
-  protect,
   registrationRules(),
   validate,
   registrationController.createRegistration
@@ -138,7 +143,7 @@ router.post(
  *       404:
  *         description: Not found
  */
-router.get("/:id", protect, registrationController.getRegistrationById);
+router.get("/:id", registrationController.getRegistrationById);
 
 /**
  * @swagger
@@ -158,7 +163,7 @@ router.get("/:id", protect, registrationController.getRegistrationById);
  *       200:
  *         description: Status updated
  */
-router.patch('/:id/payment-status', protect, isAdmin, registrationController.updatePaymentStatus);
+router.patch('/:id/payment-status', isAdmin, registrationController.updatePaymentStatus);
 
 /**
  * @swagger
@@ -186,7 +191,6 @@ router.patch('/:id/payment-status', protect, isAdmin, registrationController.upd
  */
 router.put(
   "/:id",
-  protect,
   isAdmin,
   registrationRules(),
   validate,
@@ -195,7 +199,6 @@ router.put(
 
 router.patch(
   "/:id",
-  protect,
   isAdmin,
   registrationController.updateRegistration
 );
@@ -218,6 +221,6 @@ router.patch(
  *       200:
  *         description: Deleted successfully
  */
-router.delete("/:id", protect, isAdmin, registrationController.deleteRegistration);
+router.delete("/:id", isAdmin, registrationController.deleteRegistration);
 
 module.exports = router;
